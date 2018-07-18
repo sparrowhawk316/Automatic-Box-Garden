@@ -1,0 +1,189 @@
+#include <LiquidCrystal.h>
+#include <DallasTemperature.h>
+#include <OneWire.h>
+#include <Time.h>
+#include <TimeLib.h>
+#include <avr/interrupt.h> 
+
+//define inputs
+int moistureSensor = A0;
+int lightSensor = A1;
+//int tempSensor = 16; // use 4.7k resistor
+int moistureOveride = 2;
+int nextPage = 3;
+
+//define outputs
+int pump = 13;
+int light = 12;
+int sensorOn = 11;
+
+
+//define values
+int moistureValue = 0;
+int moistureAverage = 0;
+int lightValue = 0;
+int tempValue = 0;
+int tempHigh = 0;
+int tempLow = 100;
+int lcdPage = 1;
+int moisturePercent = 0;
+int moistHigh = 0;
+int moistLow = 100;
+
+//setup OneWire to use the temp sensor
+#define ONE_WIRE_BUS 16
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire);
+
+//setup LCD with LiquidCrystal
+LiquidCrystal lcd(4,5,6,7,9,10);
+
+//setup debounce
+long lastDebounceTime = 0;
+long debounceDelay = 1000;
+
+void setup() {
+// setup the LCD
+
+lcd.begin(16,2);
+
+//prepare the sensors for communication
+Serial.begin(9600);
+sensors.begin();
+
+hour(0);// set the clock for light
+
+pinMode(moistureSensor, INPUT);
+pinMode(lightSensor, INPUT);
+//pinMode(tempSensor, INPUT);
+pinMode(moistureOveride, INPUT_PULLUP);
+pinMode(nextPage, INPUT_PULLUP);
+pinMode(pump, OUTPUT);
+pinMode(light, OUTPUT);
+pinMode(sensorOn, OUTPUT);
+
+digitalWrite(sensorOn, LOW);
+digitalWrite(pump, LOW);
+
+sei();
+attachInterrupt(digitalPinToInterrupt(moistureOveride), overide, FALLING);
+attachInterrupt(digitalPinToInterrupt(nextPage), changePage, FALLING);
+
+
+}
+
+void loop() {
+
+    digitalWrite(pump, LOW);
+    Serial.print("Pump is off\n");
+    digitalWrite(sensorOn, HIGH); //turn on the sensor
+    delay(5000);
+    moistureValue = analogRead(moistureSensor); //take reading
+    Serial.print(moistureValue);
+
+    //get the moisture level as a percentage
+    moisturePercent = (moistureValue * 100) / 1023.0;
+
+    //check for high or low
+    if (moisturePercent < moistLow)
+    {
+      moistLow = moisturePercent;
+    }
+
+    if (moisturePercent > moistHigh)
+    {
+      moistHigh = moisturePercent;
+    }
+
+    //get temperature in F
+    sensors.requestTemperatures();
+    tempValue = sensors.getTempFByIndex(0);
+    Serial.print(tempValue);
+
+    //Check for high or low
+    if (tempValue < tempLow)
+      tempLow = tempValue;
+
+    if (tempValue > tempHigh)
+      tempHigh = tempValue;
+
+    delay(2000);
+
+    //turn the sensor off
+    digitalWrite(sensorOn, LOW);
+    
+    //controls the light
+    lightValue = analogRead(lightSensor);
+    if ((lightValue < 900) && (hour() < 15))
+    {
+      digitalWrite(light, HIGH);
+    }
+    else
+    {
+      digitalWrite(light, LOW);
+    }
+
+    if (moistureValue < 800)
+    {
+      digitalWrite(pump, HIGH); //turn on the pump for 30 seconds
+      delay(30000);
+      digitalWrite(pump, LOW);
+    }
+ 
+    delay(1800000); //Wait 30 minutes before reading the sensors again
+}
+
+void overide()
+{
+  Serial.print("Overide pump\n");
+  digitalWrite(pump, !digitalRead(pump));
+}
+
+void changePage()
+{
+  Serial.print("Change");
+  if((millis() - lastDebounceTime) > debounceDelay) //check if the button has already been pressed
+  {
+    if (lcdPage == -1) // change the page
+    {
+      lcdPage = 1;
+      // display info on lcd
+      if (lcdPage == 1)
+      {
+        lcd.setCursor(0,0);
+        lcd.print("Temperature: ");
+        lcd.print(tempValue);
+        lcd.print("     ");
+        lcd.setCursor(0,1);
+        lcd.print("HI: ");
+        lcd.print(tempHigh);
+        lcd.print(" LO: ");
+        lcd.print(tempLow);
+        lcd.print("      ");
+      }
+    }
+    else
+    {
+      lcdPage = -1;
+      if (lcdPage == -1)
+      {
+        lcd.setCursor(0,0);
+        lcd.print("Moisture: ");
+        lcd.print(moisturePercent);
+        lcd.print("%     ");
+        lcd.setCursor(0,1);
+        lcd.print("HI: ");
+        lcd.print(moistHigh);
+        lcd.print("% LO: ");
+        lcd.print(moistLow);
+        lcd.print("%     ");
+      }
+    }
+    lastDebounceTime = millis(); //reset the debounce timer
+  }
+  else
+  {
+    Serial.print("Not Ready");
+  }
+
+}
